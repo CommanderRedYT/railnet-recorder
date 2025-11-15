@@ -5,35 +5,40 @@ import { Gauge, register } from 'prom-client';
 
 import 'dotenv/config';
 
-const generatedGauges = new Map<string, Gauge>();
+export const labels = ['lineNumber', 'tripNumber', 'trainType'] as const;
 
-function flattenObject(obj: object): object {
-    const toReturn = {};
+export type LabelObject = Record<(typeof labels)[number], string>;
 
-    for (const _objKey of Object.keys(obj)) {
-        if (!Object.prototype.hasOwnProperty.call(obj, _objKey)) continue;
+// gauges
+const gpsLatitudeGauge = new Gauge({
+    name: 'trainnet_gps_lat',
+    help: 'unset',
+    labelNames: labels,
+});
 
-        const objKey = _objKey as keyof typeof obj;
+const gpsLongitudeGauge = new Gauge({
+    name: 'trainnet_gps_lon',
+    help: 'unset',
+    labelNames: labels,
+});
 
-        if (typeof obj[objKey] === 'object' && obj[objKey] !== null) {
-            const flatObject = flattenObject(obj[objKey]);
-            for (const _innerKey of Object.keys(flatObject)) {
-                if (
-                    !Object.prototype.hasOwnProperty.call(flatObject, _innerKey)
-                )
-                    continue;
+const gpsOrientationGauge = new Gauge({
+    name: 'trainnet_gps_deg',
+    help: 'unset',
+    labelNames: labels,
+});
 
-                const innerKey = _innerKey as keyof typeof flatObject;
+const speedGauge = new Gauge({
+    name: 'trainnet_speed',
+    help: 'unset',
+    labelNames: labels,
+});
 
-                toReturn[(objKey + '_' + innerKey) as never] =
-                    flatObject[innerKey];
-            }
-        } else {
-            toReturn[objKey] = obj[objKey];
-        }
-    }
-    return toReturn;
-}
+const totalDelayGauge = new Gauge({
+    name: 'trainnet_total_delay',
+    help: 'unset',
+    labelNames: labels,
+});
 
 const HTTP_ADDR = process.env.HTTP_ADDR || 'localhost';
 const HTTP_PORT = (() => {
@@ -81,51 +86,33 @@ const fetchData = async (): Promise<TrainInfo | null> => {
 
         const trainData = data as TrainInfo;
 
-        const foo = flattenObject(trainData.latestStatus);
+        const labels: LabelObject = {
+            lineNumber: trainData.lineNumber,
+            tripNumber: trainData.tripNumber,
+            trainType: trainData.trainType,
+        };
 
-        for (const key of Object.keys(foo)) {
-            try {
-                let value = foo[key as never] as unknown;
-
-                if (typeof value === 'string') {
-                    const parsed = Number.parseFloat(value);
-
-                    if (Number.isNaN(parsed)) {
-                        continue;
-                    }
-
-                    value = parsed;
-                }
-
-                if (typeof value !== 'number') {
-                    continue;
-                }
-
-                if (!generatedGauges.has(key)) {
-                    generatedGauges.set(
-                        key,
-                        new Gauge({
-                            name: key.toLowerCase(),
-                            help: `${key.toLowerCase()}`,
-                        }),
-                    );
-                }
-
-                const gauge = generatedGauges.get(key);
-
-                if (gauge) {
-                    gauge.set(value);
-                }
-            } catch (error) {
-                console.log(
-                    `Unable to update prometheus metrics key=${key}`,
-                    error,
-                );
-            }
-        }
+        gpsLatitudeGauge.set(
+            labels,
+            Number(trainData.latestStatus.gpsPosition.latitude),
+        );
+        gpsLongitudeGauge.set(
+            labels,
+            Number(trainData.latestStatus.gpsPosition.longitude),
+        );
+        gpsOrientationGauge.set(
+            labels,
+            Number(trainData.latestStatus.gpsPosition.orientation),
+        );
+        speedGauge.set(labels, trainData.latestStatus.speed);
+        totalDelayGauge.set(labels, trainData.latestStatus.totalDelay);
 
         return trainData;
     } catch (error) {
+        if (error instanceof SyntaxError) {
+            return null;
+        }
+
         console.error('Error fetching train info', error);
         return null;
     }
