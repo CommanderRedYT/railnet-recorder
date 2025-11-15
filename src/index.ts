@@ -10,22 +10,10 @@ export const labels = ['lineNumber', 'tripNumber', 'trainType'] as const;
 export type LabelObject = Record<(typeof labels)[number], string>;
 
 // gauges
-const gpsLatitudeGauge = new Gauge({
-    name: 'trainnet_gps_lat',
+const gpsGauge = new Gauge({
+    name: 'trainnet_gps_coords',
     help: 'unset',
-    labelNames: labels,
-});
-
-const gpsLongitudeGauge = new Gauge({
-    name: 'trainnet_gps_lon',
-    help: 'unset',
-    labelNames: labels,
-});
-
-const gpsOrientationGauge = new Gauge({
-    name: 'trainnet_gps_deg',
-    help: 'unset',
-    labelNames: labels,
+    labelNames: [...labels, 'lat', 'long', 'rotate'],
 });
 
 const speedGauge = new Gauge({
@@ -92,17 +80,20 @@ const fetchData = async (): Promise<TrainInfo | null> => {
             trainType: trainData.trainType,
         };
 
-        gpsLatitudeGauge.set(
-            labels,
-            Number(trainData.latestStatus.gpsPosition.latitude),
-        );
-        gpsLongitudeGauge.set(
-            labels,
-            Number(trainData.latestStatus.gpsPosition.longitude),
-        );
-        gpsOrientationGauge.set(
-            labels,
-            Number(trainData.latestStatus.gpsPosition.orientation),
+        gpsGauge.set(
+            {
+                ...labels,
+                lat: Number.parseFloat(
+                    trainData.latestStatus.gpsPosition.latitude,
+                ),
+                long: Number.parseFloat(
+                    trainData.latestStatus.gpsPosition.longitude,
+                ),
+                rotate: Number.parseFloat(
+                    trainData.latestStatus.gpsPosition.orientation,
+                ),
+            },
+            0,
         );
         speedGauge.set(labels, trainData.latestStatus.speed);
         totalDelayGauge.set(labels, trainData.latestStatus.totalDelay);
