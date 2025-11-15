@@ -93,7 +93,7 @@ const fetchData = async (): Promise<TrainInfo | null> => {
                     trainData.latestStatus.gpsPosition.orientation,
                 ),
             },
-            0,
+            1,
         );
         speedGauge.set(labels, trainData.latestStatus.speed);
         totalDelayGauge.set(labels, trainData.latestStatus.totalDelay);
