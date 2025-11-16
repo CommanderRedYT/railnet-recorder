@@ -1,6 +1,7 @@
 import type { TrainInfo } from './schema.js';
 
 import express from 'express';
+import fs from 'node:fs';
 import { Gauge, register } from 'prom-client';
 
 import 'dotenv/config';
@@ -10,10 +11,22 @@ export const labels = ['lineNumber', 'tripNumber', 'trainType'] as const;
 export type LabelObject = Record<(typeof labels)[number], string>;
 
 // gauges
-const gpsGauge = new Gauge({
-    name: 'trainnet_gps_coords',
+const gpsLatGauge = new Gauge({
+    name: 'trainnet_gps_lat',
     help: 'unset',
-    labelNames: [...labels, 'lat', 'long', 'rotate'],
+    labelNames: labels,
+});
+
+const gpsLongGauge = new Gauge({
+    name: 'trainnet_gps_lon',
+    help: 'unset',
+    labelNames: labels,
+});
+
+const gpsRotateGauge = new Gauge({
+    name: 'trainnet_gps_deg',
+    help: 'unset',
+    labelNames: labels,
 });
 
 const speedGauge = new Gauge({
@@ -26,6 +39,43 @@ const totalDelayGauge = new Gauge({
     name: 'trainnet_total_delay',
     help: 'unset',
     labelNames: labels,
+});
+
+const tripLabels = [...labels, 'startStation', 'destination'] as const;
+const tripGauge = new Gauge({
+    name: 'trainnet_trip',
+    help: 'unset',
+    labelNames: tripLabels,
+});
+
+const nextStationProgressLabels = [
+    ...labels,
+    'nextStation',
+    'track',
+    'forecast_arrival',
+    'scheduled_arrival',
+    'forecast_departure',
+    'scheduled_departure',
+] as const;
+const nextStationProgressGauge = new Gauge({
+    name: 'trainnet_nextstationprogress',
+    help: 'unset',
+    labelNames: nextStationProgressLabels,
+});
+
+const currentStationLabels = [
+    ...labels,
+    'currentStation',
+    'track',
+    'forecast_arrival',
+    'scheduled_arrival',
+    'forecast_departure',
+    'scheduled_departure',
+] as const;
+const currentStationGauge = new Gauge({
+    name: 'trainnet_currentstation',
+    help: 'unset',
+    labelNames: currentStationLabels,
 });
 
 const HTTP_ADDR = process.env.HTTP_ADDR || 'localhost';
@@ -45,34 +95,49 @@ const importantKeys = ['latestStatus'];
 
 const fetchData = async (): Promise<TrainInfo | null> => {
     try {
-        const res = await fetch(
-            'https://railnet.oebb.at/assets/media/fis/combined.json',
-        );
+        let trainData: TrainInfo;
 
-        if (!res?.ok) {
-            return null;
+        if (process.env.USE_TEST_DATA === '1') {
+            console.log('Using test data');
+            const dataStr = fs.readFileSync(
+                'test-data/oebb-trainnet.json',
+                'utf8',
+            );
+
+            trainData = JSON.parse(dataStr) as TrainInfo;
+        } else {
+            const res = await fetch(
+                'https://railnet.oebb.at/assets/media/fis/combined.json',
+            );
+
+            if (!res?.ok) {
+                return null;
+            }
+
+            const data = (await res.json()) as unknown;
+
+            if (typeof data !== 'object') {
+                console.warn(
+                    'Got invalid JSON, type did not match',
+                    typeof data,
+                );
+                return null;
+            }
+
+            if (data === null) {
+                console.warn('Got invalid JSON, data === null');
+                return null;
+            }
+
+            const dataKeys = Object.keys(data);
+
+            if (!importantKeys.every(key => dataKeys.includes(key))) {
+                console.warn('Got invalid JSON, will return null');
+                return null;
+            }
+
+            trainData = data as TrainInfo;
         }
-
-        const data = (await res.json()) as unknown;
-
-        if (typeof data !== 'object') {
-            console.warn('Got invalid JSON, type did not match', typeof data);
-            return null;
-        }
-
-        if (data === null) {
-            console.warn('Got invalid JSON, data === null');
-            return null;
-        }
-
-        const dataKeys = Object.keys(data);
-
-        if (!importantKeys.every(key => dataKeys.includes(key))) {
-            console.warn('Got invalid JSON, will return null');
-            return null;
-        }
-
-        const trainData = data as TrainInfo;
 
         const labels: LabelObject = {
             lineNumber: trainData.lineNumber,
@@ -80,23 +145,75 @@ const fetchData = async (): Promise<TrainInfo | null> => {
             trainType: trainData.trainType,
         };
 
-        gpsGauge.set(
-            {
-                ...labels,
-                lat: Number.parseFloat(
-                    trainData.latestStatus.gpsPosition.latitude,
-                ),
-                long: Number.parseFloat(
-                    trainData.latestStatus.gpsPosition.longitude,
-                ),
-                rotate: Number.parseFloat(
-                    trainData.latestStatus.gpsPosition.orientation,
-                ),
-            },
-            1,
+        gpsLatGauge.set(
+            labels,
+            Number.parseFloat(trainData.latestStatus.gpsPosition.latitude),
+        );
+        gpsLongGauge.set(
+            labels,
+            Number.parseFloat(trainData.latestStatus.gpsPosition.longitude),
+        );
+        gpsRotateGauge.set(
+            labels,
+            Number.parseFloat(trainData.latestStatus.gpsPosition.orientation),
         );
         speedGauge.set(labels, trainData.latestStatus.speed);
         totalDelayGauge.set(labels, trainData.latestStatus.totalDelay);
+        tripGauge.set(
+            {
+                ...labels,
+                startStation: trainData.startStation,
+                destination:
+                    trainData.destination.all ||
+                    trainData.destination.de ||
+                    'unknown',
+            },
+            1,
+        );
+        nextStationProgressGauge.set(
+            {
+                ...labels,
+                nextStation:
+                    trainData.nextStation.name.all ||
+                    trainData.nextStation.name.de ||
+                    'unknown',
+                forecast_arrival:
+                    trainData.nextStation.arrival.forecast || 'unknown',
+                scheduled_arrival:
+                    trainData.nextStation.arrival.scheduled || 'unknown',
+                forecast_departure:
+                    trainData.nextStation.departure.forecast || 'unknown',
+                scheduled_departure:
+                    trainData.nextStation.departure.scheduled || 'unknown',
+                track:
+                    trainData.nextStation.track.all ||
+                    trainData.nextStation.track.de ||
+                    'unknown',
+            },
+            trainData.nextStationProgress,
+        );
+        currentStationGauge.set(
+            {
+                ...labels,
+                currentStation:
+                    trainData.currentStation.name.all ||
+                    trainData.currentStation.name.de ||
+                    'unknown',
+                forecast_arrival:
+                    trainData.currentStation.arrival.forecast || 'unknown',
+                scheduled_arrival:
+                    trainData.currentStation.arrival.scheduled || 'unknown',
+                forecast_departure:
+                    trainData.currentStation.departure.forecast || 'unknown',
+                scheduled_departure:
+                    trainData.currentStation.departure.scheduled || 'unknown',
+                track:
+                    trainData.currentStation.track.all ||
+                    trainData.currentStation.track.de ||
+                    'unknown',
+            },
+            1,
+        );
 
         return trainData;
     } catch (error) {
@@ -111,11 +228,34 @@ const fetchData = async (): Promise<TrainInfo | null> => {
 
 const app = express();
 
-app.get('/metrics', async (_req, res) => {
+app.get('/', (_req, res) => {
+    res.redirect('/metrics');
+});
+
+app.get('/metrics', async (req, res) => {
     try {
+        console.debug('Fetching metrics...', {
+            addr: req.socket.remoteAddress,
+        });
         await fetchData();
         res.set('Content-Type', register.contentType);
         res.end(await register.metrics());
+        console.debug('Successfully fetched metrics');
+    } catch (error) {
+        res.status(500).end(error);
+    }
+});
+
+app.get('/json', async (req, res) => {
+    try {
+        console.debug('Fetching metrics as json...', {
+            addr: req.socket.remoteAddress,
+        });
+        const data = await fetchData();
+
+        console.debug('Successfully fetched metrics');
+
+        res.json(data);
     } catch (error) {
         res.status(500).end(error);
     }
