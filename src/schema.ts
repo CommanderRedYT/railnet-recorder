@@ -51,7 +51,7 @@ export interface Connection {
 export interface LatestStatus {
     dateTime: string;
     situation: Situation;
-    gpsPosition: GpsPosition;
+    gpsPosition: GpsPosition | null;
     speed: number;
     distance: Distance;
     totalDelay: number;

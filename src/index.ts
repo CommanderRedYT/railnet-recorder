@@ -147,15 +147,21 @@ const fetchData = async (): Promise<TrainInfo | null> => {
 
         gpsLatGauge.set(
             labels,
-            Number.parseFloat(trainData.latestStatus.gpsPosition.latitude),
+            Number.parseFloat(
+                trainData.latestStatus.gpsPosition?.latitude || '0',
+            ),
         );
         gpsLongGauge.set(
             labels,
-            Number.parseFloat(trainData.latestStatus.gpsPosition.longitude),
+            Number.parseFloat(
+                trainData.latestStatus.gpsPosition?.longitude || '0',
+            ),
         );
         gpsRotateGauge.set(
             labels,
-            Number.parseFloat(trainData.latestStatus.gpsPosition.orientation),
+            Number.parseFloat(
+                trainData.latestStatus.gpsPosition?.orientation || '0',
+            ),
         );
         speedGauge.set(labels, trainData.latestStatus.speed);
         totalDelayGauge.set(labels, trainData.latestStatus.totalDelay);
